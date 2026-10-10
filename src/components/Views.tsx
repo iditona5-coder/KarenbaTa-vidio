@@ -18,7 +18,13 @@ import {
   Star,
   Code2,
   ArrowUpRight,
-  X
+  X,
+  Cloud,
+  Database,
+  ShieldCheck,
+  Sparkles,
+  UploadCloud,
+  FolderCheck
 } from 'lucide-react';
 import { useKarebata } from '../context/KarebataContext';
 import { NewsArticle, NewsPhoto } from '../types/news';
@@ -505,6 +511,7 @@ export const BerandaView: React.FC = () => {
     activeTab,
     setPendingMedia,
     setIsMediaLoading,
+    uploadMediaToImageKit,
     user
   } = useKarebata();
 
@@ -797,23 +804,35 @@ export const BerandaView: React.FC = () => {
       }
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
+    // 1. Tampilkan pratinjau lokal seketika (tanpa delay base64)
+    const localUrl = URL.createObjectURL(file);
+    const initialItem: NewsPhoto = {
+      url: localUrl,
+      caption: file.name.replace(/\.[^/.]+$/, ''),
+      photographer: user.displayName,
+      mediaType: isVid ? 'video' : 'image',
+      thumbnailUrl: initialThumb || undefined
+    };
+    setPendingMedia(initialItem);
+    setIsMediaLoading(false);
+
+    // 2. Unggah otomatis di latar belakang ke ImageKit CDN pribadi
+    uploadMediaToImageKit(file, {
+      folder: isVid ? '/karebata/videos' : '/karebata/photos',
+      tags: ['karebata', 'warga_feed', isVid ? 'video' : 'foto']
+    })
+      .then((res) => {
         setPendingMedia({
-          url: reader.result,
-          caption: file.name.replace(/\.[^/.]+$/, ''),
-          photographer: user.displayName,
-          mediaType: isVid ? 'video' : 'image',
-          thumbnailUrl: initialThumb || undefined
+          ...initialItem,
+          url: res.url,
+          fileId: res.fileId,
+          thumbnailUrl: initialThumb || res.thumbnailUrl
         });
-        setIsMediaLoading(false);
-      }
-    };
-    reader.onerror = () => {
-      setIsMediaLoading(false);
-    };
-    reader.readAsDataURL(file);
+      })
+      .catch((err) => {
+        console.warn('Upload ImageKit di latar belakang:', err);
+      });
+
     e.target.value = '';
   };
 
@@ -1520,7 +1539,9 @@ export const BuatKabarView: React.FC = () => {
     pendingMedia,
     setPendingMedia,
     isMediaLoading,
-    setIsMediaLoading
+    setIsMediaLoading,
+    uploadMediaToImageKit,
+    imagekitEndpoint
   } = useKarebata();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1531,6 +1552,9 @@ export const BuatKabarView: React.FC = () => {
   const [showCoverPicker, setShowCoverPicker] = useState<boolean>(false);
   const [desc, setDesc] = useState('');
   const [loc, setLoc] = useState(user.homeLocation ? user.homeLocation.slice(0, 25) : '');
+  const [isUploadingImageKit, setIsUploadingImageKit] = useState<boolean>(false);
+  const [localUploadPercent, setLocalUploadPercent] = useState<number>(0);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Ekstrak thumbnail otomatis jika media adalah video dan belum memiliki thumbnail
   useEffect(() => {
@@ -1581,25 +1605,44 @@ export const BuatKabarView: React.FC = () => {
       setVideoThumb(null);
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        const item: NewsPhoto = {
-          url: reader.result,
-          caption: file.name.replace(/\.[^/.]+$/, ''),
-          photographer: user.displayName,
-          mediaType: isVid ? 'video' : 'image',
-          thumbnailUrl: capturedThumb || undefined
-        };
-        setMedia(item);
-        setPendingMedia(item);
-        setIsMediaLoading(false);
-      }
+    // 1. Tampilkan pratinjau lokal instan (tanpa delay base64)
+    const localBlobUrl = URL.createObjectURL(file);
+    const initialItem: NewsPhoto = {
+      url: localBlobUrl,
+      caption: file.name.replace(/\.[^/.]+$/, ''),
+      photographer: user.displayName,
+      mediaType: isVid ? 'video' : 'image',
+      thumbnailUrl: capturedThumb || undefined
     };
-    reader.onerror = () => {
-      setIsMediaLoading(false);
-    };
-    reader.readAsDataURL(file);
+    setMedia(initialItem);
+    setPendingMedia(initialItem);
+    setIsMediaLoading(false);
+
+    // 2. Unggah otomatis langsung ke ImageKit.io CDN pribadi
+    setIsUploadingImageKit(true);
+    setLocalUploadPercent(0);
+    try {
+      const uploadRes = await uploadMediaToImageKit(file, {
+        folder: isVid ? '/karebata/videos' : '/karebata/photos',
+        tags: ['karebata', 'warga_feed', isVid ? 'video' : 'foto'],
+        onProgress: (pct) => setLocalUploadPercent(pct)
+      });
+
+      const updatedMedia: NewsPhoto = {
+        ...initialItem,
+        url: uploadRes.url,
+        fileId: uploadRes.fileId,
+        thumbnailUrl: capturedThumb || uploadRes.thumbnailUrl
+      };
+      setMedia(updatedMedia);
+      setPendingMedia(updatedMedia);
+      showToast('Media berhasil disimpan di ImageKit.io CDN!');
+    } catch (uploadErr) {
+      console.warn('Upload ImageKit di latar belakang:', uploadErr);
+    } finally {
+      setIsUploadingImageKit(false);
+    }
+
     e.target.value = '';
   };
 
@@ -1607,31 +1650,54 @@ export const BuatKabarView: React.FC = () => {
   // Posting aktif jika deskripsi minimal 99 huruf dan ada media
   const isReadyToShare = isDescValid && media !== null;
 
-  const handleShare = () => {
-    if (!isReadyToShare) return;
+  const handleShare = async () => {
+    if (!isReadyToShare || isSubmitting) return;
 
-    const cleanText = desc.trim();
-    const cleanLocation = loc.trim() || 'Sulawesi';
-    const paragraphs = cleanText.split(/\n+/).filter(Boolean);
+    setIsSubmitting(true);
+    try {
+      const cleanText = desc.trim();
+      const cleanLocation = loc.trim() || 'Sulawesi';
+      const paragraphs = cleanText.split(/\n+/).filter(Boolean);
 
-    const mediaWithThumb: NewsPhoto = {
-      ...media,
-      thumbnailUrl: videoThumb || media.thumbnailUrl || undefined
-    };
+      let finalMediaThumb = videoThumb || media.thumbnailUrl;
 
-    createArticle({
-      title: paragraphs[0] || cleanText,
-      summary: cleanText,
-      contentParagraphs: paragraphs.length > 0 ? paragraphs : [cleanText],
-      location: cleanLocation.slice(0, 25),
-      category: 'Budaya & Warisan',
-      photos: [mediaWithThumb]
-    });
+      // Jika thumbnail kustom berupa dataURL dari canvas scrubber
+      if (finalMediaThumb && finalMediaThumb.startsWith('data:')) {
+        try {
+          const thumbRes = await uploadMediaToImageKit(finalMediaThumb, {
+            folder: '/karebata/thumbs',
+            tags: ['karebata', 'thumbnail']
+          });
+          finalMediaThumb = thumbRes.url;
+        } catch (e) {
+          console.warn('Gagal upload thumbnail kustom ke ImageKit:', e);
+        }
+      }
 
-    setPendingMedia(null);
-    setIsMediaLoading(false);
-    showToast('Kabar berita berhasil diterbitkan!');
-    setActiveTab('beranda');
+      const mediaWithThumb: NewsPhoto = {
+        ...media,
+        thumbnailUrl: finalMediaThumb || undefined
+      };
+
+      await createArticle({
+        title: paragraphs[0] || cleanText,
+        summary: cleanText,
+        contentParagraphs: paragraphs.length > 0 ? paragraphs : [cleanText],
+        location: cleanLocation.slice(0, 25),
+        category: 'Budaya & Warisan',
+        photos: [mediaWithThumb]
+      });
+
+      setPendingMedia(null);
+      setIsMediaLoading(false);
+      showToast('Kabar berita berhasil diterbitkan ke Firebase & ImageKit!');
+      setActiveTab('beranda');
+    } catch (err) {
+      console.error('Error saat menerbitkan kabar:', err);
+      showToast('Terjadi kendala saat menerbitkan kabar.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -1859,6 +1925,58 @@ export const BuatKabarView: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Status Penyimpanan Media ImageKit.io CDN */}
+        <div className="mx-4 mt-3 mb-4 p-3 rounded-xl border border-sky-200/80 bg-sky-50/70 text-xs select-none">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-icons text-sky-600" style={{ fontSize: '18px' }}>
+                cloud_upload
+              </span>
+              <div>
+                <span className="font-bold text-sky-950 block text-xs">
+                  ImageKit.io Media CDN Pribadi
+                </span>
+                <span className="text-[10px] text-sky-700 font-mono">
+                  ik.imagekit.io/rdyi1j1sg
+                </span>
+              </div>
+            </div>
+            {isUploadingImageKit ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
+                <span className="w-2.5 h-2.5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+                {localUploadPercent}%
+              </span>
+            ) : media?.url?.includes('ik.imagekit.io') ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                <span className="material-icons text-[13px]">check_circle</span>
+                Tersimpan di CDN
+              </span>
+            ) : media ? (
+              <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                Pratinjau Siap
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold text-stone-500 bg-white px-2 py-0.5 rounded-full border border-stone-200">
+                Folder /karebata
+              </span>
+            )}
+          </div>
+
+          {isUploadingImageKit && (
+            <div className="mt-2.5">
+              <div className="w-full bg-sky-200/80 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-sky-600 h-1.5 rounded-full transition-all duration-150"
+                  style={{ width: `${localUploadPercent}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-sky-700 block mt-1 font-medium">
+                Mengunggah {media?.mediaType === 'video' ? 'video' : 'foto'} berita ke CDN ImageKit...
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Pindah Tombol Posting di Bawah */}
@@ -1867,15 +1985,24 @@ export const BuatKabarView: React.FC = () => {
           id="btnShare"
           type="button"
           onClick={handleShare}
-          disabled={!isReadyToShare}
+          disabled={!isReadyToShare || isSubmitting}
           className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all select-none shadow-sm ${
-            isReadyToShare
+            isReadyToShare && !isSubmitting
               ? 'bg-sky-500 hover:bg-sky-600 active:scale-[0.99] text-white cursor-pointer shadow-sky-100'
               : 'bg-stone-200 text-stone-400 cursor-not-allowed'
           }`}
         >
-          <span className="material-icons" style={{ fontSize: '20px' }}>send</span>
-          Posting Kabar Berita
+          {isSubmitting ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>Menerbitkan ke Firebase & ImageKit...</span>
+            </>
+          ) : (
+            <>
+              <span className="material-icons" style={{ fontSize: '20px' }}>send</span>
+              <span>Posting Kabar Berita</span>
+            </>
+          )}
         </button>
         {!isReadyToShare && (
           <p className="text-[11px] text-stone-400 text-center mt-2 font-medium select-none">
@@ -2024,7 +2151,12 @@ export const AkunView: React.FC<AkunViewProps> = ({ onOpenFlutterCode }) => {
     updateUserProfile,
     articles,
     savedArticles,
-    openArticleDetail
+    openArticleDetail,
+    firebaseStatus,
+    firebaseProjectId,
+    imagekitStatus,
+    imagekitEndpoint,
+    imagekitPublicKey
   } = useKarebata();
 
   const [nameInput, setNameInput] = useState(user.displayName);
@@ -2163,6 +2295,118 @@ export const AkunView: React.FC<AkunViewProps> = ({ onOpenFlutterCode }) => {
             <div className="text-xs text-stone-500">Tersimpan</div>
             <div className="font-editorial text-2xl sm:text-3xl font-semibold text-stone-900 mt-1 tabular-nums">
               {savedArticles.length}
+            </div>
+          </div>
+        </section>
+
+        {/* Status Integrasi Firebase Cloud Pribadi */}
+        <section className="p-6 rounded-2xl border border-stone-200 bg-stone-50/70 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+                <Cloud className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-editorial text-lg font-semibold text-stone-900">
+                    Firebase Cloud Database Pribadi
+                  </h2>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                    {firebaseStatus === 'connected' ? 'Terhubung (Aktif)' : 'Menghubungkan...'}
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500 font-mono mt-0.5">
+                  Project ID: {firebaseProjectId}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
+            <div className="p-3 bg-white rounded-xl border border-stone-200">
+              <div className="text-stone-500 flex items-center gap-1.5 font-medium mb-1">
+                <Database className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Cloud Firestore</span>
+              </div>
+              <div className="font-semibold text-stone-800">Koleksi: articles, users</div>
+              <div className="text-[11px] text-stone-400 mt-0.5">Real-time sync aktif</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-stone-200">
+              <div className="text-stone-500 flex items-center gap-1.5 font-medium mb-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Autentikasi</span>
+              </div>
+              <div className="font-semibold text-stone-800">Firebase Auth + Google</div>
+              <div className="text-[11px] text-stone-400 mt-0.5">kareba-ta-728d0.firebaseapp.com</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-stone-200">
+              <div className="text-stone-500 flex items-center gap-1.5 font-medium mb-1">
+                <Cloud className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Cloud Storage</span>
+              </div>
+              <div className="font-semibold text-stone-800">kareba-ta-728d0.firebasestorage.app</div>
+              <div className="text-[11px] text-stone-400 mt-0.5">Media & Video Berita</div>
+            </div>
+          </div>
+        </section>
+
+        {/* Status Integrasi ImageKit.io Media CDN Pribadi */}
+        <section className="p-6 rounded-2xl border border-sky-200 bg-sky-50/60 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-600 flex items-center justify-center shrink-0">
+                <UploadCloud className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-editorial text-lg font-semibold text-stone-900">
+                    ImageKit.io Media CDN Pribadi
+                  </h2>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                    {imagekitStatus === 'uploading' ? 'Mengunggah...' : 'Terhubung (Aktif)'}
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500 font-mono mt-0.5">
+                  Endpoint: {imagekitEndpoint}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
+            <div className="p-3 bg-white rounded-xl border border-sky-100 shadow-xs">
+              <div className="text-stone-500 flex items-center gap-1.5 font-medium mb-1">
+                <Video className="w-3.5 h-3.5 text-sky-600" />
+                <span>Video Berita Warga</span>
+              </div>
+              <div className="font-semibold text-stone-800">Folder: /karebata/videos</div>
+              <div className="text-[11px] text-stone-400 mt-0.5">Streaming H.264 & Auto-Thumbnails</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-sky-100 shadow-xs">
+              <div className="text-stone-500 flex items-center gap-1.5 font-medium mb-1">
+                <ImagePlus className="w-3.5 h-3.5 text-sky-600" />
+                <span>Foto & Sampul Liputan</span>
+              </div>
+              <div className="font-semibold text-stone-800">Folder: /karebata/photos</div>
+              <div className="text-[11px] text-stone-400 mt-0.5">Auto WebP, AVIF & Rasio Asli</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-sky-100 shadow-xs">
+              <div className="text-stone-500 flex items-center gap-1.5 font-medium mb-1">
+                <FolderCheck className="w-3.5 h-3.5 text-sky-600" />
+                <span>Kredensial & Autentikasi</span>
+              </div>
+              <div className="font-semibold text-stone-800 font-mono text-[11px] truncate">
+                ID: rdyi1j1sg
+              </div>
+              <div className="text-[11px] text-stone-400 mt-0.5 font-mono truncate">
+                Public: {imagekitPublicKey.slice(0, 16)}...
+              </div>
             </div>
           </div>
         </section>

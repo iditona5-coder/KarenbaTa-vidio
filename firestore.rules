@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Koleksi Berita / Articles
+    match /articles/{articleId} {
+      // Pembaca umum dapat membaca berita tanpa harus login
+      allow read: if isValidId(articleId);
+
+      // Pembuatan berita oleh pengguna terotentikasi atau kontributor
+      allow create: if isSignedIn()
+        && isValidId(articleId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'summary', 'location', 'category', 'authorName'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 300
+        && request.resource.data.summary is string
+        && request.resource.data.summary.size() <= 1000;
+
+      // Update berita oleh pemilik artikel
+      allow update, delete: if isSignedIn()
+        && (resource.data.authorUid == request.auth.uid || resource.data.authorEmail == request.auth.token.email);
+    }
+
+    // Profil Akun Pengguna / Users
+    match /users/{userId} {
+      allow read: if isValidId(userId);
+      allow create, update: if isOwner(userId)
+        && request.resource.data.keys().hasAll(['uid', 'displayName', 'email'])
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isOwner(userId);
+    }
+  }
+}

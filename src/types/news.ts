@@ -9,6 +9,7 @@ export interface NewsPhoto {
   mediaType?: 'image' | 'video';
   durationLabel?: string;
   thumbnailUrl?: string;
+  fileId?: string;
 }
 
 export interface NewsArticle {
@@ -36,4 +37,5 @@ export interface UserProfile {
   roleTitle: string;
   homeLocation: string;
   isSignedIn: boolean;
+  photoURL?: string;
 }

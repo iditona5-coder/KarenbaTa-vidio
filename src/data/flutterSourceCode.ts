@@ -1089,5 +1089,116 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 }`
+  },
+  {
+    path: 'lib/firebase_options.dart',
+    title: 'Konfigurasi Firebase Proyek Pribadi (kareba-ta-728d0)',
+    description: 'Inisialisasi konfigurasi Firebase untuk Web dan Android sesuai kunci proyek Firebase kareba-ta-728d0.',
+    code: `import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+
+class DefaultFirebaseOptions {
+  static FirebaseOptions get currentPlatform {
+    if (kIsWeb) {
+      return web;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return android;
+      default:
+        return web;
+    }
+  }
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyCIYga4scuibu7DvScxjy2LAyDZaC66zJM',
+    appId: '1:88744359192:web:3961c5cac1fa073cb35a6d',
+    messagingSenderId: '88744359192',
+    projectId: 'kareba-ta-728d0',
+    authDomain: 'kareba-ta-728d0.firebaseapp.com',
+    storageBucket: 'kareba-ta-728d0.firebasestorage.app',
+    measurementId: 'G-Z0BDDY9HCM',
+  );
+
+  static const FirebaseOptions android = FirebaseOptions(
+    apiKey: 'AIzaSyCIYga4scuibu7DvScxjy2LAyDZaC66zJM',
+    appId: '1:88744359192:web:3961c5cac1fa073cb35a6d',
+    messagingSenderId: '88744359192',
+    projectId: 'kareba-ta-728d0',
+    storageBucket: 'kareba-ta-728d0.firebasestorage.app',
+  );
+}`
+  },
+  {
+    path: 'lib/services/imagekit_service.dart',
+    title: 'Layanan Media CDN ImageKit.io (Foto & Video)',
+    description: 'Inisialisasi pengunggahan berkas media, CDN streaming video H.264, dan thumbnail otomatis dengan kunci ImageKit pribadi.',
+    code: `import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:crypto/crypto.dart';
+
+class ImageKitConfig {
+  static const String publicKey = 'public_WEwv7Q9gV4tFyZzV0obqGnKfT94=';
+  static const String urlEndpoint = 'https://ik.imagekit.io/rdyi1j1sg';
+  static const String privateKey = 'private_Hfxv7O6OPu7fA8wOA03WgNaxMKY=';
+  static const String defaultFolder = '/karebata';
+
+  /// Generate signature HMAC-SHA1 untuk autentikasi aman
+  static String generateSignature(String token, int expire) {
+    final key = utf8.encode(privateKey);
+    final bytes = utf8.encode('$token$expire');
+    final hmacSha1 = Hmac(sha1, key);
+    return hmacSha1.convert(bytes).toString();
+  }
+
+  /// Unggah berkas foto atau video dari perangkat ke ImageKit.io
+  static Future<Map<String, dynamic>> uploadFile({
+    required File file,
+    required String fileName,
+    String folder = defaultFolder,
+    List<String> tags = const ['karebata', 'warga_feed'],
+    Function(double progress)? onProgress,
+  }) async {
+    final token = DateTime.now().millisecondsSinceEpoch.toString();
+    final expire = (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 1800;
+    final signature = generateSignature(token, expire);
+
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('https://upload.imagekit.io/api/v1/files/upload'),
+    );
+
+    request.fields['publicKey'] = publicKey;
+    request.fields['signature'] = signature;
+    request.fields['expire'] = expire.toString();
+    request.fields['token'] = token;
+    request.fields['fileName'] = fileName;
+    request.fields['folder'] = folder;
+    request.fields['useUniqueFileName'] = 'true';
+    request.fields['tags'] = tags.join(',');
+
+    request.files.add(await http.MultipartFile.fromPath('file', file.path));
+
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Gagal mengunggah ke ImageKit: \${response.body}');
+    }
+  }
+
+  /// Helper untuk mendapatkan URL thumbnail video dari ImageKit
+  static String getVideoThumbnailUrl(String videoUrl) {
+    if (videoUrl.contains('ik.imagekit.io')) {
+      return '\$videoUrl/ik-thumbnail.jpg';
+    }
+    return videoUrl;
+  }
+}`
   }
 ];
+

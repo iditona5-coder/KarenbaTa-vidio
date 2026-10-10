@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "articles": {
+      "title": "NewsArticle",
+      "description": "Berita dan liputan digital warga lokal Sulawesi Selatan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "content": { "type": "array" },
+        "photos": { "type": "array" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "location": { "type": "string" },
+        "category": { "type": "string" },
+        "publishedAt": { "type": "string" },
+        "relativeTime": { "type": "string" },
+        "formattedDate": { "type": "string" },
+        "readTimeMinutes": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "summary", "location", "category", "authorName"]
+    },
+    "users": {
+      "title": "UserProfile",
+      "description": "Profil kontributor dan pengguna Kareba'Ta",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "roleTitle": { "type": "string" },
+        "homeLocation": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "displayName", "email"]
+    }
+  },
+  "firestore": {
+    "/articles/{articleId}": {
+      "schema": "articles",
+      "description": "Daftar artikel berita lokal publik"
+    },
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "Data profil akun kontributor"
+    }
+  }
+}
