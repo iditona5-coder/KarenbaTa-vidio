@@ -1,0 +1,6 @@
+{
+  "name": "Kareba'Ta — Majalah Berita Lokal Digital",
+  "description": "Aplikasi berita dan informasi lokal bergaya majalah digital modern dengan navigasi vertikal layar penuh (PageView.vertical) dan desain Material 3.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
