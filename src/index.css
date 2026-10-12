@@ -255,3 +255,35 @@
 .animate-fadeIn {
   animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+/* ===== UBAH TEMA JADI PUTIH ORANGE - KAREBA'TA ===== */
+#root {
+  background-color: #FFFFFF !important;
+  color: #111827 !important;
+}
+
+/* Paksa background hitam jadi putih */
+body {
+  background-color: #FFFFFF !important;
+}
+
+/* Semua header / nav yang hitam jadi putih */
+header, nav, div[class*="Header"], div[class*="Bottom"] {
+  background-color: #FFFFFF !important;
+  border-color: #E5E7EB !important;
+}
+
+/* Logo tetap hijau tua + orange */
+span {
+  color: inherit;
+}
+
+/* Progress bar video & tombol hijau jadi ORANGE #FF8C00 */
+.bg-green-500, .bg-green-600, .bg-emerald-500, .bg-emerald-600,
+.bg-\[\#00FF00\], .bg-lime-500 {
+  background-color: #FF8C00 !important;
+}
+
+/* Garis video bawah */
+div.h-1 {
+  background-color: #FF8C00 !important;
+  }
